@@ -4,7 +4,7 @@ author: "Owen R. Evans"
 date: "6/13/2021"
 output: word_document
 ---
-
+ 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
