@@ -1,0 +1,586 @@
+---
+title: "Appendix"
+author: "Owen R. Evans"
+date: "6/13/2021"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Appendix - RScript for Data Due Diligence
+
+``` {r Appendix, eval=FALSE}
+library(tidyverse)
+library(openxlsx)
+library(ggplot2)
+library(janitor)
+library(dlookr)
+library(psych)
+library(car)
+library(summarytools)
+library(corrplot)
+
+Data1 <- read.xlsx("CustomerData.xlsx", sheet = 1, 
+                   na.strings = c("","NA","#NULL!"))
+
+########################
+# Regrouping Variables #
+########################
+
+# Group 1 - Identifer
+ID <- "CustomerID"
+
+# Group 2 - Geographic
+Geo <- c("Region","TownSize")
+
+# Group 3 - Demographic, Financial
+DemoFin <- c("HHIncome",
+             "DebtToIncomeRatio",
+             "CreditDebt",
+             "OtherDebt",
+             "LoanDefault",
+             "CreditCard",
+             "CardTenure",
+             "CardItemsMonthly",
+             "CardSpendMonth")
+
+#Group 4 - Demographic
+Demo <- c('Gender',
+          'Age',
+          'EducationYears',
+          'JobCategory',
+          'UnionMember',
+          'EmploymentLength',
+          'Retired',
+          'MaritalStatus',
+          'HouseholdSize',
+          'HomeOwner',
+          'PoliticalPartyMem',
+          'Votes')
+
+# Group 5 - Lifestyle
+Life <- c('NumberPets',
+          'NumberCats',
+          'NumberDogs',
+          'NumberBirds',
+          'CarsOwned',
+          'CarOwnership',
+          'CarBrand',
+          'CarValue',
+          'CommuteTime',
+          'ActiveLifestyle',
+          'TVWatchingHours',
+          'OwnsPC',
+          'OwnsMobileDevice',
+          'OwnsGameSystem',
+          'OwnsFax',
+          'NewsSubscriber')
+
+#Group 6 - Transactional / Business
+Business <- c('PhoneCoTenure',
+              'VoiceLastMonth',
+              'VoiceOverTenure',
+              'EquipmentRental',
+              'EquipmentLastMonth',
+              'EquipmentOverTenure',
+              'CallingCard',
+              'WirelessData',
+              'DataLastMonth',
+              'DataOverTenure',
+              'Multiline',
+              'VM',
+              'Pager',
+              'Internet',
+              'CallerID',
+              'CallWait',
+              'CallForward',
+              'ThreeWayCalling',
+              'EBilling')
+
+# Reorder Data Set
+col_order <- c(ID,Geo,Demo, DemoFin, Life, Business)
+Data1 <- Data1[, col_order]
+
+################
+# Missing Data #
+################
+
+# How Many Missing Values? - 131 across the entire data set
+# Where are the Missing Values located?
+sum(is.na(Data1))
+missing <- sapply(Data1, function(x) sum(is.na(x)))
+missing <- missing[missing != 0]
+suspect_vars <- names(missing)
+
+missing_perc <- sapply(Data1, function(x) sum(is.na(x))/length(x))*100
+missing_perc <- missing_perc[missing_perc > 0.0]
+
+# Focus on these variables (top 3) to fix missing values - Gender, Birds, Homeowner
+# For Gender - act another factor level
+str(Data1$Gender)
+Data1 <- Data1 %>% mutate(Gender = ifelse(is.na(Gender), "Undeclared", Gender))
+table(Data1$Gender)
+
+# For Birds - convert no response to zero
+table(Data1$NumberBirds)
+Data1 <- Data1 %>% mutate(NumberBirds = ifelse(is.na(NumberBirds), 0, NumberBirds))
+
+# Homeownership - Inspect Characteristics of NA's
+# Replace with most frequent value (mode)
+HomeNA <- filter(Data1, is.na(HomeOwner))
+table(Data1$HomeOwner) # frequency of yes (1) is 1.7x that of no (0)
+Data1 <- mutate(Data1, 
+                HomeOwner = ifelse(is.na(HomeOwner), 1, HomeOwner)) 
+# Convert NA's to NO
+remove(HomeNA)
+Data1$HomeOwner <- as.factor(Data1$HomeOwner)
+levels(Data1$HomeOwner) <- c("No", "Yes") # recode 0,1 to No,Yes
+
+# NA treatment Job Category
+# Categories are not extensive
+# N/A might be other
+str(Data1$JobCategory)
+unique(Data1$JobCategory)
+JobNA <- Data1 %>% filter(is.na(JobCategory))
+View(JobNA)
+Data1 <- mutate(Data1, 
+         JobCategory = ifelse(is.na(JobCategory), "Other", JobCategory))
+remove(JobNA)
+
+# All Other NA's - Eliminate from Dataset,  Very low frequency
+Data1 <- na.omit(Data1)
+
+##################
+# Data Structure #
+##################
+# Will need to recode 33 categorical variables to factors
+str(Data1)
+
+z <- c("Region","TownSize", "Gender", 
+       "JobCategory", "UnionMember", 
+       "Retired", "MaritalStatus", 
+       "HouseholdSize", "HomeOwner",
+       "PoliticalPartyMem", "Votes",
+       "LoanDefault", "CreditCard", 
+       "CarOwnership", "CarBrand", 
+       "ActiveLifestyle", "OwnsPC",
+       "OwnsMobileDevice", "OwnsGameSystem",
+       "OwnsFax", "NewsSubscriber", "EquipmentRental",
+       "CallingCard", "WirelessData", "Multiline",
+       "VM", "Pager", "Internet", "CallerID",
+       "CallWait", "CallForward", "ThreeWayCalling",
+       "EBilling")
+
+Data1[z]<-lapply(Data1[z],factor)
+
+#################
+# Data Problems #
+#################
+
+# Internet Recoding
+# Convert 2,3,4 to yes values,  
+# assuming that any other answer than zero indicates the affirmative
+table(Data1$Internet)
+str(Data1$Internet)
+
+Data1 <- Data1 %>% mutate (Internet = case_when(Internet == "2" ~ "Yes",
+                                       Internet == "3" ~ "Yes",
+                                       Internet == "4" ~ "Yes",
+                                       Internet == "Yes" ~ "Yes",
+                                       Internet == "No" ~ "No"))
+
+# Car Ownership, Car Brand
+# Change the -1 to None - Assuming these are folks who don't own cars
+levels(Data1$CarOwnership) <- c("None", "Lease", "Own")
+levels(Data1$CarBrand) <- c("None", "Domestic", "Foreign")
+
+# CarValue - Replace -1000 values to 0
+Data1 <- Data1 %>% mutate(CarValue= ifelse(CarValue==-1000, 0, CarValue))
+
+# PhoneCoTenure - Eliminate Zero Values - NonNegative Value Needed for ARPU
+Data1 <- mutate(Data1, PhoneCoTenure = 
+                  replace(PhoneCoTenure, PhoneCoTenure == 0, 1))
+
+#####################################
+# Univariate Descriptive Statistics #
+#####################################
+# Use pysch:describe to afford summary table
+
+# Numeric, Continuous Variables
+Data1_Num <- select_if(Data1, is.numeric)
+SumTableNum <- psych::describe(Data1_Num, 
+                               IQR=TRUE, 
+                               quant=c(0.25,0.75))
+
+names(SumTableNum) <- c( "Vars", "n", "Mean", "Standard Deviation",      
+                         "Median", "Trimmed Mean" , "Mad", "Min" ,    
+                         "Max", "Range", "Skew" , "Kurtosis",
+                         "SE" , "IQR", "Q1", "Q3")
+
+write.csv(SumTableNum, "SummaryTableNum.csv")
+View(SumTableNum)
+
+
+#############################################################
+# Inspect Key Numerics for Skew or Outliers #
+#############################################################
+
+# Find possible outliers via +/- 1.5 IQR Values
+
+SumTableNum <- mutate (SumTableNum, Outliers = case_when (
+         Max > (Q3+(1.5 * IQR))| Min < (Q1-(1.5 * IQR)) ~ "Yes",
+         TRUE ~ "No"))
+
+Outliers <- filter(SumTableNum, Outliers == "Yes") 
+rownames(Outliers)
+
+boxplot(Data1$HHIncome) # High Earners
+boxplot(Data1$EmploymentLength) # Most subscribers are new workers
+boxplot(Data1$HouseholdSize) # A few larger families
+boxplot(Data1$VoiceOverTenure) # Zero Inflated
+boxplot(Data1$CreditDebt) # Zero Inflated
+boxplot(Data1$TVWatchingHours) # A few extremes
+
+
+####################################################
+# Variable Transformations and Feature Engineering #
+####################################################
+
+# HHIncome, Right Skewed Data
+# Power transformed to normality
+hist(Data1$HHIncome)
+summary(powerTransform(Data1$HHIncome))  # Max Likelihood/BoxCox
+Data1$TransHHIncome <- Data1$HHIncome ^ -0.1708
+hist(Data1$TransHHIncome)
+
+# HHIncome,  Binned, Convert Continuous to Discrete
+# Potentially important for segmentation exercise
+
+Data1 <- mutate(Data1, HHIncomeBin = case_when(
+  HHIncome < 20000                        ~ "<$20,000",
+  HHIncome >= 20000 & HHIncome <40000     ~ "$20,000-$39,999",
+  HHIncome >= 40000 & HHIncome <60000     ~ "$40,000-$59,999",
+  HHIncome >= 60000 & HHIncome <80000     ~ "$60,000-$79,999",
+  HHIncome >= 80000 & HHIncome <100000    ~ "$80,000-$99,999",
+  HHIncome >= 100000                     ~ ">$100,000"
+  )
+)
+
+Data1$HHIncomeBin <- as.factor (Data1$HHIncomeBin)
+table(Data1$HHIncomeBin)
+Data1$HHIncomeBin <- factor(Data1$HHIncomeBin, 
+                          levels = c("<$20,000", "$20,000-$39,999", 
+                          "$40,000-$59,999", "$60,000-$79,999",
+                          "$80,000-$99,999", ">$100,000")
+                          )
+View(Data1[,c("HHIncome","HHIncomeBin")])
+
+# Binned Age Group
+Data1 <- mutate(Data1, AgeBin = case_when(
+  Age < 20                  ~ "<20",
+  Age >= 20 & Age <30        ~ "20-29",
+  Age >= 30 & Age <40       ~ "30-39",
+  Age >= 40 & Age <50       ~ "40-49",
+  Age >= 50& Age  <60        ~ "50-59",
+  Age >= 60 & Age <70       ~ "60-69",
+  Age >=70                  ~ "70+"
+  )
+)
+
+str(Data1$AgeBin)
+Data1$AgeBin <- as.factor (Data1$AgeBin)
+table(Data1$AgeBin)
+
+# Adding Total Revenue per User Over PhoneCoTenure
+# Adding ARPU - Average Revenue per User - Total Revenue/Tenure
+# Adding Recent Rev Variation
+# How much does the last month revenue per user differ from average?
+
+Data1 <- mutate(Data1, Total_Revenue = VoiceOverTenure + EquipmentOverTenure + 
+                DataOverTenure)
+Data1 <- mutate(Data1, ARPU = Total_Revenue/PhoneCoTenure)
+Data1 <- mutate(Data1, RecentRevenueVariation = ((DataLastMonth+VoiceLastMonth+
+                                                    EquipmentLastMonth)/ARPU))
+Data1[,c("ARPU", "RecentRevenueVariation", "Total_Revenue")]
+
+hist(Data1$RecentRevenueVariation, breaks=30) # RRV is bimodal
+Data1 <- mutate (Data1, RRV_Cat = case_when (
+  RecentRevenueVariation <2.1  ~ "LowRRV",
+  RecentRevenueVariation >= 2.1 ~ "HighRRV"
+))
+
+hist(Data1$ARPU) # Heavy Right Skew in ARPU
+hist(log(Data1$ARPU)) # Normalized
+Data1$ARPU_Log <- log(Data1$ARPU) # log transformed
+
+# Determine most lucrative service
+# Add new variable to track those users that use this service
+
+attach(Data1)
+x <- sum(VoiceLastMonth, DataLastMonth, EquipmentLastMonth)
+y <- c(sum(VoiceLastMonth), sum(DataLastMonth), sum(EquipmentLastMonth))
+z <- y/x
+a <- c("Voice", "Data", "Equipment")
+names(z) <- a
+detach(Data1)
+print(z)
+
+Data1 <- mutate(Data1, VoiceUtil = 
+                  VoiceLastMonth/(VoiceLastMonth+
+                                    DataLastMonth+
+                                    EquipmentLastMonth)*100)
+
+# Voice Utilization is Also Bimodal - lots of just voice customers
+png("VoiceHist.png")
+VoiceHist <- hist(Data1$VoiceUtil, breaks=30, 
+                  main="Histogram of Percent Voice Utilization per Customer",
+                  xlab="Percent Voice Utilization")
+dev.off()
+
+# New Variable to indicate high/low voice utilization
+Data1 <- mutate (Data1, VoiceUtilCat = case_when (
+  VoiceUtil <90  ~ "Low Voice Utilization",
+  VoiceUtil >= 90 ~ "High Voice Utilization"
+))
+
+
+
+####################################
+# Regrouping Variables w/ New Adds #
+####################################
+
+# Group 1 - Identifer
+ID <- "CustomerID"
+
+# Group 2 - Geographic
+Geo <- c("Region","TownSize")
+
+# Group 3 - Demographic, Financial
+DemoFin <- c("HHIncome",
+             "TransHHIncome",
+             "HHIncomeBin",
+             "DebtToIncomeRatio",
+             "CreditDebt",
+             "OtherDebt",
+             "LoanDefault",
+             "CreditCard",
+             "CardTenure",
+             "CardItemsMonthly",
+             "CardSpendMonth")
+
+#Group 4 - Demographic
+Demo <- c('Gender',
+          'Age',
+          'AgeBin',
+          'EducationYears',
+          'JobCategory',
+          'UnionMember',
+          'EmploymentLength',
+          'Retired',
+          'MaritalStatus',
+          'HouseholdSize',
+          'HomeOwner',
+          'PoliticalPartyMem',
+          'Votes')
+
+# Group 5 - Lifestyle
+Life <- c('NumberPets',
+          'NumberCats',
+          'NumberDogs',
+          'NumberBirds',
+          'CarsOwned',
+          'CarOwnership',
+          'CarBrand',
+          'CarValue',
+          'CommuteTime',
+          'ActiveLifestyle',
+          'TVWatchingHours',
+          'OwnsPC',
+          'OwnsMobileDevice',
+          'OwnsGameSystem',
+          'OwnsFax',
+          'NewsSubscriber')
+
+#Group 6 - Transactional / Business
+Business <- c('PhoneCoTenure',
+              'VoiceLastMonth',
+              'VoiceOverTenure',
+              'EquipmentRental',
+              'EquipmentLastMonth',
+              'EquipmentOverTenure',
+              'CallingCard',
+              'WirelessData',
+              'DataLastMonth',
+              'DataOverTenure',
+              'Multiline',
+              'VM',
+              'Pager',
+              'Internet',
+              'CallerID',
+              'CallWait',
+              'CallForward',
+              'ThreeWayCalling',
+              'EBilling',
+              'Total_Revenue',
+              'ARPU',
+              'ARPU_Log',
+              'RecentRevenueVariation',
+              'VoiceUtil',
+              'RRV_Cat',
+              'VoiceUtilCat')
+
+# Reorder Data Set with Engineered Variables
+col_order <- c(ID,Geo,Demo, DemoFin, Life, Business)
+Data1 <- Data1[, col_order]
+
+##################################
+# Summary Stats w/ New Variables #
+##################################
+
+# Continuous Variables
+Data1_Num <- select_if(Data1, is.numeric)
+SumTableNum2 <- psych::describe(Data1_Num, 
+                               IQR=TRUE, 
+                               quant=c(0.25,0.75))
+
+names(SumTableNum2) <- c( "Vars", "n", "Mean", "Standard Deviation",      
+                         "Median", "Trimmed Mean" , "Mad", "Min" ,    
+                         "Max", "Range", "Skew" , "Kurtosis",
+                         "SE" , "IQR", "Q-25th", "Q-75th")
+
+write.csv(SumTableNum2, "SummaryTableNum2.csv")
+View(SumTableNum2)
+
+##################################
+# Selected Categorical Variables #
+##################################
+
+Data1_Cat <- select_if(Data1, is.factor)
+
+# Age Breakdown
+AgeSum <- summarytools::freq(Data1$AgeBin)
+write.csv (AgeSum, "AgeSum.csv")
+
+# Breakdown of Income
+IncomeSum <- summarytools::freq(Data1$HHIncomeBin)
+write.csv (IncomeSum, "IncomeSum.csv")
+
+# Breakdown of Gender
+GenderSum <- summarytools::freq(Data1$Gender)
+write.csv (GenderSum, "GenderSum.csv")
+
+# Breakdown of Region
+RegionSum <- summarytools::freq(Data1$Region)
+write.csv (RegionSum, "RegionSum.csv")
+
+# Breakdown of Equipment Rental
+EquipSum2 <- summarytools::freq(Data1$EquipmentRental)
+write.csv (EquipSum2, "EquipSum2.csv")
+
+######################
+# Hypothesis Testing #
+######################
+
+# Phone Company Tenure vs. Age, Linear Regression
+# What type of customers are less prone to churn?
+# Married customers...
+attach(Data1)
+plot(PhoneCoTenure~ActiveLifestyle)
+result <- t.test(PhoneCoTenure~ActiveLifestyle, data = Data1)
+result
+
+png("FTT.png")
+plot(PhoneCoTenure~ActiveLifestyle)
+dev.off()
+
+plot(PhoneCoTenure~MaritalStatus)
+result <- t.test(PhoneCoTenure~MaritalStatus, data = Data1)
+result
+
+png("FFF.png")
+plot(PhoneCoTenure~MaritalStatus)
+dev.off()
+
+png("Age.png")
+plot(PhoneCoTenure~AgeBin)
+dev.off()
+Tenure_age.aov <- aov(PhoneCoTenure~AgeBin) # unequal variances
+summary(Tenure_age.aov)
+TukeyHSD(Tenure_age.aov)
+
+detach(Data1)
+
+# What explanatory variables are correlated to ARPU?
+# correlogram
+Data1_Num <- select_if(Data1, is.numeric)
+res <- cor(Data1_Num)
+corrplot(res,type="upper", is.corr = FALSE)
+
+# ARPU ~ Age (linear regression)
+attach(Data1)
+png("Arpu_LM.png")
+plot(ARPU_Log~Age)
+abline(lm(ARPU_Log~Age), col="red")
+dev.off()
+ARPU_Age.lm <- lm(ARPU_Log~Age)
+summary(ARPU_Age.lm) # Low R2,  but significant
+plot(ARPU_Age.lm) # Check for lm assumptions
+detach(Data1)
+
+# Check with Age Bins, ANOVA
+attach(Data1)
+plot(ARPU_Log~AgeBin)
+ARPU_age.aov <- aov(ARPU_Log~AgeBin)
+summary(ARPU_age.aov)
+TukeyHSD(ARPU_age.aov)
+detach(Data1)
+
+# What explanatory variables are correlated 
+# to a High or Low Recent Revenue Variation Value?
+
+hist(Data1$RecentRevenueVariation, breaks=30) # bimodal
+Data1 <- mutate (Data1, RRV_Cat = case_when (
+  RecentRevenueVariation <2.1  ~ "LowRRV",
+  RecentRevenueVariation >= 2.1 ~ "HighRRV"
+))
+
+# Use Chi2 test to look for dependencies 
+RRV_Table <- xtabs(~RRV_Cat+AgeBin, Data1)                         
+chisq.test(RRV_Table) 
+RRV1 <- prop.table(RRV_Table)
+write.csv(RRV1, "RRV1.csv")
+write.csv(RRV_Table, "RRVTable.csv")
+# reject the null,  RRV_Cat and AgeBin are not independent
+
+# Is it driven by higher earners?
+RRV_Table2 <- xtabs(~RRV_Cat+HHIncomeBin, Data1)
+chisq.test(RRV_Table2) 
+RRV2 <- prop.table(RRV_Table2)
+write.csv(RRV2, "RRV2.csv")
+write.csv(RRVTable2, "RRVTable2.csv")
+
+# Two Sample t-test for RRV_Cat vs Age
+plot(Data1$Age~as.factor(Data1$RRV_Cat))
+result2 <- t.test(Age~RRV_Cat, data = Data1)
+result2
+# Recent rise in revenue likely attributed to older folks?
+
+# Is High RRV related to the type of service? 
+# High Voice Utilization
+# Chi Squared Test for Independence
+RRV_Table3 <- xtabs(~RRV_Cat+VoiceUtilCat, Data1)
+chisq.test(RRV_Table3) 
+RRV3 <- prop.table(RRV_Table3)
+write.csv(RRV3, "RRV2.csv")
+write.csv(RRV_Table3, "RRVTable3.csv")
+
+# Export final dataset
+write.xlsx(Data1, "EngineeredData.xlsx")
+
+#END
+
+
+
+```
