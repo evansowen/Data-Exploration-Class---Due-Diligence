@@ -1,2 +1,4 @@
 # Data-Exploration-Class---Due-Diligence
 Exploratory Data Analysis - Telecom Customer Survey
+
+This overall goal for this project was to conduct an exploratory data analysis (EDA) of a Telecom customer survey dataset.   The ultimate intent of this data exploration and wrangling exercise is to prepare the dataset to conduct a comprehensive segmentation exercise.    The EDA involved a series of steps ranging from missing value analysis, feaature selecton/engineering and summary of univariate statistics.     Finally,  we conducted a series of Chi-squared tests to identify that a relatively large group of older customers were responsible for a recent reveunue surge due to an increase in the utilization of Voice services.    Overall,  the EDA was successful in addressing data quality issues,  generating new predictors via feature engineering and identifying those features that are most useful for an upcoming segmentation 
